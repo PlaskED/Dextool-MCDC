@@ -38,11 +38,14 @@ extern (C++, dextool_clang_extension) {
         /// Only valid values if true.
         bool hasValue;
         OpKind kind;
-
+    
         /// The location of the operator
         CXSourceLocation location;
         /// Character length of the operator
         byte opLength;
+
+      // string representation of operator
+        const char* opString;
 
         /// The cursor for the operator.
         CXCursor cursor;
@@ -233,8 +236,8 @@ Operator getExprOperator(const CXCursor expr) @trusted {
     // This function is safe for all possible inputs.
     // Note: CXXOperatorCallExpr is denoted callExpr in the C API.
     if (clang_getCursorKind(expr).among(CXCursorKind.binaryOperator,
-            CXCursorKind.unaryOperator, CXCursorKind.callExpr)) {
-        return Operator(dex_getExprOperator(expr));
+					CXCursorKind.unaryOperator, CXCursorKind.callExpr, CXCursorKind.compoundAssignOperator)) {
+      return Operator(dex_getExprOperator(expr));
     }
 
     return Operator();
@@ -321,6 +324,11 @@ auto getUnderlyingExprNode(const CXCursor expr) @trusted {
     size_t length() const {
         return dx.opLength;
     }
+
+  string opString() const @trusted {
+    import std.conv : to;
+    return to!string(dx.opString);
+  }
 
     void toString(Writer, Char)(scope Writer w, FormatSpec!Char fmt) const {
         import std.format : formatValue, formattedWrite;

@@ -1,130 +1,48 @@
-# dextool [![Build Status](https://dev.azure.com/wikodes/wikodes/_apis/build/status/joakim-brannstrom.dextool?branchName=master)](https://dev.azure.com/wikodes/wikodes/_build/latest?definitionId=1&branchName=master) [![codecov](https://codecov.io/gh/joakim-brannstrom/dextool/branch/master/graph/badge.svg)](https://codecov.io/gh/joakim-brannstrom/dextool)
+# dextool-mcdc
+**Dextool-Mcdc** is a a dextool plugin for generating test cases with MC/DC coverage from C++ code. Test cases are found using incremental SAT solving with Z3.
 
-**Dextool** is a framework for writing plugins using libclang. The main focus
-is tools for testing and analyze.
+# Dependencies
+* Dextool (https://github.com/joakim-brannstrom/dextool)
+* Z3 (https://github.com/Z3Prover/z3)
+* python-pip & pip compdb
+* Ubuntu 18.1+ (Recommended)
 
-The plugins in a standard installation of Dextool are:
- - Analyze. Analyze C/C++ code to generate complexity numbers such as McCabe.
- - C TestDouble. Analyze C code to generate a test double implementation.
- - C++ TestDouble. Analyze C++ code to generate a test double implementation.
- - Mutate. Mutation testing tool for C/C++.
- - GraphML. Analyze C/C++ code to generate a GraphML representation.
-   Call chains, type usage, classes as _groups_ of methods and members.
- - UML. Analyze C/C++ code to generate PlantUML diagrams.
-
-# Plugin Status
-
- * **Analyze**: production ready.
- * **C TestDouble**: production ready. The API of the generated code and how it behaves is stable.
- * **C++ TestDouble** is production ready. The API of the generated code and how it behaves is stable.
- * **Fuzzer**: alpha.
- * **GraphML**: beta.
- * **UML**: beta.
- * [**Mutate**](plugin/mutate/README.md): production ready.
-
-# Getting Started
-
-Dextool depends on the following software packages:
-
- * [llvm](http://releases.llvm.org/download.html) (4.0+, both libclang and LLVM is needed)
- * [cmake](https://cmake.org/download) (3.5+)
- * [D compiler](https://dlang.org/download.html) (dmd 2.081.2+, ldc 1.11.0+)
- * [sqlite3](https://sqlite.org/download.html) (3.19.3-3+)
-
-Dextool has been tested with libclang [4.0, 5.0, 6.0, 7.0, 8.0].
-
-For people running Ubuntu two of the dependencies can be installed via apt-get.
-The version of clang and llvm depend on your ubuntu version.
+# Installation
+1. Clone this repository
+2. Install Dextool _dependencies_:
 ```sh
-sudo apt install build-essential cmake llvm-4.0 llvm-4.0-dev clang-4.0 libclang-4.0-dev libsqlite3-dev
+sudo apt install build-essential cmake llvm-4.0 llvm-4.0-dev clang-4.0 libclang-4.0-dev libsqlite3-dev ldc dub
 ```
-
-It is recommended to install the D compiler by downloading it from the official distribution page.
+3. Install Z3:
 ```sh
-# link https://dlang.org/download.html
-curl -fsS https://dlang.org/install.sh | bash -s dmd
-```
-
-Once the dependencies are installed it is time to download the source code and
-build the binaries.
-```sh
-git clone https://github.com/joakim-brannstrom/dextool.git
-cd dextool
-mkdir build
+git clone https://github.com/Z3Prover/z3
+cd z3
+python scripts/mk_make.py --python
 cd build
-cmake -DCMAKE_INSTALL_PREFIX=/path/to/where/to/install/dextool/binaries ..
-make install -j2
+make
+sudo make install
 ```
-
-Done! Have fun.
-Don't be shy to report any issue that you find.
-
-## Common Build Errors
-
-## component_tests Fail
-
-The most common reason for why `component_tests` fail is that clang++ try to use the latest GCC that is installed but the c++ standard library is not installed for that compiler.
-
-Try to compile the following code with clang++:
-```c++
-#include <string>
-
-int main(int argc, char **argv) {
-    return 0;
-}
-```
-
+4. Stand in root directory and compile dextool:
 ```sh
-clang++ -v test.cpp
+make
 ```
 
-If it fails with something like this:
+* Newer versions of llvm and clang can be used.
+
+5. Install compdb:
 ```sh
-test.cpp:1:10: fatal error: 'string' file not found
-```
-
-it means that you need to install the c++ standard library for your compiler.
-
-In the output look for this line:
-```sh
- /usr/bin/../lib/gcc/x86_64-linux-gnu/XYZ/../../../../include/c++
-```
-
-From that line we can deduce that the package to install in Ubuntu is:
-```sh
-sudo apt install libstdc++-XYZ-dev
-```
-
-### Mismatch Clang and LLVM
-
-To build dextool the dev packages are required. Dextool is optimistic and assume that the latest and greatest version of llvm+libclang should be used. But this also requires that the dev packages are installed.
-
-If you get this error:
-```sh
-libclang_interop.hpp:13:10: fatal error: clang/Analysis/CFG.h: No such file or directory
- #include <clang/Analysis/CFG.h>
-```
-
-It means that you need to install `llvm-x.y-dev` and `libclang-x.y-dev` for the version that Dextool detected.
-
-### SQLite link or missing
-
-The sqlite3 library source code with a cmake build file in the vendors directory. It is intended for those old OSs that have too old versions of sqlite.
-
-To use it do something like this.
-```sh
-mkdir sqlite3
-cd sqlite3 && cmake ../vendor/sqlite && make && cd ..
-# setup dextool build to use it
-mkdir build
-cd build && cmake .. -DSQLITE3_LIB="-L/opt/sqlite -lsqlite3"
+sudo apt install python-pip && pip install compdb
 ```
 
 # Usage
+For projects with CMake, generate a compilation database with CMake and use compdb to generate a new compilation database with headers:
 
-See the usage examples in respective plugin directory:
- * [mutate](plugin/mutate/examples)
+```sh
+cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ..
+compdb -p src/build/ list > compile_commands.json
+```
 
-# Credit
-Jacob Carlborg for his excellent DStep. It was used as a huge inspiration for
-this code base. Without DStep Dextool wouldn't exist.
+You can now run the plugin on your project like:
+```sh
+dextool-mcdc --compile-db compile_commands.json
+```

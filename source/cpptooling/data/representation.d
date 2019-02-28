@@ -35,7 +35,7 @@ import std.array : Appender;
 import std.format : format, FormatSpec;
 import std.range : isInputRange;
 import std.traits : Unqual;
-import std.typecons : Tuple, Flag, Yes, No, Nullable;
+import std.typecons : Tuple, Flag, Yes, No, Nullable, NullableRef;
 import std.variant : Algebraic;
 import logger = std.experimental.logger;
 
@@ -43,7 +43,6 @@ public import cpptooling.data.type;
 
 import cpptooling.data.kind_type;
 import cpptooling.data.symbol.types : USRType;
-import dextool.hash : makeHash;
 
 static import cpptooling.data.class_classification;
 
@@ -79,12 +78,12 @@ void funcToString(Writer, Char)(const(CppClass.CppFunc) func, scope Writer w, in
     import std.format : formattedWrite;
     import std.variant : visit;
 
-    //dfmt off
+    // dfmt off
     func.visit!((const(CppMethod) a) => formattedWrite(w, fmt, a),
                 (const(CppMethodOp) a) => formattedWrite(w, fmt, a),
                 (const(CppCtor) a) => formattedWrite(w, fmt, a),
                 (const(CppDtor) a) => formattedWrite(w, fmt, a));
-    //dfmt on
+    // dfmt on
 }
 
 string funcToString(const(CppClass.CppFunc) func) @safe {
@@ -100,15 +99,74 @@ string funcToString(const(CppClass.CppFunc) func) @safe {
     return trustedUnique(buf);
 }
 
-string methodNameToString(const(CppClass.CppFunc) func) @trusted {
+auto methodId(CppClass.CppFunc func) @trusted {
+    import std.variant : visit;
+    import std.conv : to;
+
+    // dfmt off
+    return func.visit!((CppMethod a) => cast(IDType)a.id,
+                       (CppMethodOp a) => cast(IDType)a.id,
+		       (CppCtor a) => cast(IDType)a.id,
+		       (CppDtor a) => cast(IDType)a.id);
+    // dfmt on
+}
+
+auto methodParamRange(CppClass.CppFunc func) @trusted {
+  import std.variant : visit;
+
+  // dfmt off
+  return func.visit!((CppMethod a) => a.paramRange,
+		     (CppMethodOp a) => a.paramRange,
+		     (CppCtor a) => a.paramRange,
+		     (CppDtor a) => CxParam[].init);
+  // dfmt on
+}
+
+Nullable!CppCtor getFirstConstructor(CppClass c) @trusted {
+  import std.variant : visit;
+
+  Nullable!CppCtor res = Nullable!CppCtor.init;
+  // dfmt off
+  foreach (a ; c.methodRange) {
+    // dfmt off
+    if (!res.isNull) {
+      break;
+    }
+    a.visit!((d) {
+	alias T = Unqual!(typeof(d));
+	static if (is(T == CppMethod)) { }
+	else static if (is(T == CppMethodOp)) { }
+	else static if (is(T == CppCtor)) {
+	  res = cast(CppCtor)d;
+	}
+	else static if (is(T == CppDtor)) {}
+      });
+  }
+  return res;
+  // dfmt on
+}
+
+string methodNameToString(CppClass.CppFunc func) @trusted {
     import std.variant : visit;
 
-    //dfmt off
-    return func.visit!((const(CppMethod) a) => a.name,
-                       (const(CppMethodOp) a) => a.name,
-                       (const(CppCtor) a) => a.name,
-                       (const(CppDtor) a) => a.name);
-    //dfmt on
+    // dfmt off
+    return func.visit!((CppMethod a) => a.name,
+                       (CppMethodOp a) => a.name,
+                       (CppCtor a) => a.name,
+                       (CppDtor a) => a.name);
+    // dfmt on
+}
+
+string methodParamsToString(CppClass.CppFunc func) @trusted {
+    import std.variant : visit;
+
+    // dfmt off
+    auto params = func.visit!((CppMethod a) => a.paramRange,
+			      (CppMethodOp a) => a.paramRange,
+			      (CppCtor a) => a.paramRange,
+			      (CppDtor a) => CxParam[].init);
+    // dfmt on
+    return params.joinParamTypes;
 }
 
 /// Convert a CxParam to a string.
@@ -139,7 +197,7 @@ string paramNameToString(CxParam p, string id = "") @trusted {
 
 /// Standard implementation of toString using the toString that take an
 /// OutputRange.
-private string standardToString() {
+string standardToString() {
     return q{
     string toString()() const {
         import std.format : FormatSpec;
@@ -163,6 +221,7 @@ private string standardToString() {
 /// unique between objects.
 private template mixinUniqueId(IDType) if (is(IDType == size_t) || is(IDType == string)) {
     //TODO add check to see that this do NOT already have id_.
+  import dextool.hash : makeHash;
 
     private IDType id_;
 
@@ -170,7 +229,7 @@ private template mixinUniqueId(IDType) if (is(IDType == size_t) || is(IDType == 
 
     static if (is(IDType == size_t)) {
         private void setUniqueId(string identifier) @safe pure nothrow {
-            this.id_ = makeHash(identifier);
+	  this.id_ = makeHash(identifier);
         }
     } else static if (is(IDType == string)) {
         private void setUniqueId(Char)(Char[] identifier) @safe pure nothrow {
@@ -413,12 +472,15 @@ private void assertVisit(ref const(CxParam) p) @trusted {
 }
 
 struct CxGlobalVariable {
+  import std.typecons : Flag;
     mixin mixinUniqueId!size_t;
 
     private TypeKindVariable variable;
 
     Nullable!USRType usr;
     Nullable!Language language;
+  Flag!"isMacro" _isMacro;
+  Nullable!string _value;
 
     invariant {
         assert(usr.isNull || usr.length > 0);
@@ -428,9 +490,10 @@ struct CxGlobalVariable {
      * do NOT use the usr from var.type.kind.usr, it is for the type not the
      * instance.
      */
-    this(USRType usr, TypeKindVariable var) @safe pure nothrow {
+  this(USRType usr, TypeKindVariable var, Flag!"isMacro" isMacro = No.isMacro) @safe pure nothrow {
         this.usr = usr;
         this.variable = var;
+	this._isMacro = isMacro;
 
         if (var.name.length != 0) {
             // Prefer using the name because it is also the c/c++ identifier.
@@ -445,6 +508,11 @@ struct CxGlobalVariable {
     this(USRType usr, TypeKindAttr type, CppVariable name) @safe pure nothrow {
         this(usr, TypeKindVariable(type, name));
     }
+
+  this(USRType usr, TypeKindVariable var, string value) @safe pure nothrow {
+    this(usr, TypeKindVariable(type, name), Yes.isMacro);
+    this._value = value; 
+  }
 
 const:
 
@@ -508,6 +576,17 @@ const:
     auto typeName() {
         return variable;
     }
+
+    auto isMacro() {
+      return _isMacro == Yes.isMacro;
+    }
+
+    auto value() {
+      if (isMacro) {
+	return _value.get;
+      }
+      return "";
+    }
 }
 
 struct CppMethodGeneric {
@@ -520,7 +599,9 @@ struct CppMethodGeneric {
             return params_;
         }
 
-        private CxParam[] params_;
+      private {
+	CxParam[] params_;
+      }
     }
 
     /** Common properties for c'tor, d'tor, methods and operators.
@@ -530,6 +611,14 @@ struct CppMethodGeneric {
      */
     template BaseProperties() {
         import std.typecons : Nullable;
+
+      void put(DecisionBlock db) {
+	decisionBlock_ = db;
+      }
+
+      auto decisionBlock() const @nogc @safe pure nothrow {
+	return decisionBlock_;
+      }
 
         const pure @nogc nothrow {
             bool isVirtual() {
@@ -562,7 +651,9 @@ struct CppMethodGeneric {
         private Nullable!MemberVirtualType classification_;
         private CppAccess accessType_;
         private Nullable!CppMethodName name_;
+        private DecisionBlock decisionBlock_;
     }
+
 
     /** Properties used by methods and operators.
      *
@@ -630,6 +721,7 @@ struct CFunction {
         CxReturnType returnType_;
         VariadicType isVariadic_;
         StorageClass storageClass_;
+	DecisionBlock decisionBlock_;
     }
 
     invariant() {
@@ -647,27 +739,27 @@ struct CFunction {
     /// C function representation.
     this(const USRType usr, const CFunctionName name, const CxParam[] params_,
             const CxReturnType return_type, const VariadicType is_variadic,
-            const StorageClass storage_class) @safe {
+	 const StorageClass storage_class, DecisionBlock db = DecisionBlock.init) @trusted {
         this.usr = usr;
         this.name_ = name;
         this.returnType_ = return_type;
         this.isVariadic_ = is_variadic;
         this.storageClass_ = storage_class;
-
+	this.decisionBlock_ = db;
         this.params = params_.dup;
 
         setUniqueId(format("%s(%s)", name, params.joinParamTypes));
     }
 
     /// Function with no parameters.
-    this(USRType usr, const CFunctionName name, const CxReturnType return_type) @safe {
-        this(usr, name, CxParam[].init, return_type, VariadicType.no, StorageClass.None);
+  this(USRType usr, const CFunctionName name, const CxReturnType return_type, DecisionBlock db = DecisionBlock.init) @safe {
+      this(usr, name, CxParam[].init, return_type, VariadicType.no, StorageClass.None, db);
     }
 
     /// Function with no parameters and returning void.
-    this(USRType usr, const CFunctionName name) @safe {
+  this(USRType usr, const CFunctionName name, DecisionBlock db = DecisionBlock.init) @safe {
         auto void_ = CxReturnType(makeSimple("void"));
-        this(usr, name, CxParam[].init, void_, VariadicType.no, StorageClass.None);
+        this(usr, name, CxParam[].init, void_, VariadicType.no, StorageClass.None, db);
     }
 
     void toString(Writer, Char)(scope Writer sink, FormatSpec!Char fmt) const {
@@ -701,6 +793,10 @@ nothrow pure @nogc:
 
     auto name() {
         return name_;
+    }
+
+    auto decisionBlock() {
+      return decisionBlock_;
     }
 
     StorageClass storageClass() {
@@ -743,7 +839,7 @@ struct CppCtor {
         }
     }
 
-    this(const USRType usr, const CppMethodName name, const CxParam[] params, const CppAccess access) @safe {
+  this(const USRType usr, const CppMethodName name, const CxParam[] params, const CppAccess access) @trusted {
         this.usr = usr;
         this.name_ = name;
         this.accessType_ = access;
@@ -767,18 +863,25 @@ struct CppCtor {
 @safe:
     mixin mixinCommentHelper;
     mixin mixinUniqueId!size_t;
-    mixin CppMethodGeneric.Parameters;
+  mixin CppMethodGeneric.Parameters;
+  mixin CppMethodGeneric.BaseProperties;
 
 const:
-    mixin(standardToString);
+  mixin(standardToString);
 
-    auto accessType() {
-        return accessType_;
-    }
+  auto accessType() {
+    return accessType_;
+  }
 
-    auto name() {
-        return name_;
-    }
+  nothrow pure @nogc:
+
+  auto name() {
+    return name_;
+  }
+
+  auto paramRange() {
+    return params_;
+  }
 }
 
 struct CppDtor {
@@ -1053,13 +1156,421 @@ const:
     }
 }
 
+struct DecisionGeneric {
+  template Variables() {
+    
+    private {
+      AnalyzeVarData _varData;
+    }
+
+    const:
+    string fixParamNames(string r, NullableRef!AnalyzeVarData inVarData = NullableRef!AnalyzeVarData.init) @trusted {
+      import std.string : replace, format;
+      import std.algorithm : filter, canFind;
+      import std.array : array;
+      import std.conv : to;
+      
+      if (inVarData.isNull) {
+	return r;
+      }
+
+      auto callerKey = to!string(inVarData.get.funcId);
+      auto cpm = inVarData.get.callParamMapping;
+      auto prm = inVarData.get.paramRegexMapping;
+      auto toParams = cpm[callerKey];
+
+      foreach(param ; toParams) {
+	if (!(param in prm)) {
+	  continue;
+	}
+	r = replace(r, format("v['%s']", prm[param]), format("v['%s']", param));
+      }
+      return r;
+    }
+    
+    const pure nothrow @nogc @safe:
+    
+    auto varData() {
+      return _varData;
+    }
+    
+    auto variables() {
+      return _varData.variables;
+    }
+
+    auto funcCallMapping() {
+      return _varData.funcCallMapping;
+    }
+    
+    auto callParamMapping() {
+      return _varData.callParamMapping;
+    }
+  }
+}
+
+struct DecisionBlock {
+  import std.variant : Algebraic;
+  alias Decision = Algebraic!(CppIfStmt, CppForLoop, CppWhileLoop, CppSwitch, CppReturnStmt, CppAssignment);
+
+  private {
+    Decision[] decisions;
+    CppNsStack reside_in_ns;
+  }
+
+  void put(Decision d) {
+    this.decisions ~= d;
+  }
+
+  void put(Decision[] ds) {
+    this.decisions ~= ds;
+  }
+
+  void put(CppAssignment[] assigns) {
+    import std.algorithm : each;
+    assigns.each!(a => put(cast(Decision)a));
+  }
+
+  void putNs(CppNsStack ns_stack) {
+    this.reside_in_ns = ns_stack;
+  }
+
+const:
+  auto getNsStack() {
+    return reside_in_ns;
+  }
+
+  string toString() const @trusted  {
+    import std.variant : visit;
+    import std.algorithm : map;
+    import std.array : array, join;
+
+    // dfmt off
+    return decisionRange
+      .map!(d => d.visit!((const(CppIfStmt) a) => a.toString,
+			  (const(CppForLoop) a) => a.toString,
+			  (const(CppWhileLoop) a) => a.toString,
+			  (const(CppSwitch) a) => a.toString,
+			  (const(CppReturnStmt) a) => a.toString,
+			  (const(CppAssignment) a) => a.toString))
+      .array
+      .join("\n");
+    // dfmt on
+  }
+  
+  string[] toSolverFormat(NullableRef!AnalyzeVarData inVarData = NullableRef!AnalyzeVarData.init) @trusted {
+    import std.variant : visit;
+    import std.algorithm : each;
+
+    string[] res;
+
+    // dfmt off
+    decisionRange
+      .each!(d => d.visit!((const(CppIfStmt) a) => res ~= a.toSolverFormat(inVarData),
+			   (const(CppForLoop) a) => res ~= a.toSolverFormat(inVarData),
+			   (const(CppWhileLoop) a) => res ~= a.toSolverFormat(inVarData),
+			   (const(CppSwitch) a) => res ~= a.toSolverFormat(inVarData),
+			   (const(CppReturnStmt) a) => res ~= a.toSolverFormat(inVarData),
+			   (const(CppAssignment) a) => res ~= []));
+    // dfmt on
+    return res;
+  }
+
+  CppAssignment[] assignRange(NullableRef!AnalyzeVarData inVarData = NullableRef!AnalyzeVarData.init) @trusted {
+    import std.variant : visit;
+    
+    CppAssignment[] res;
+
+    // dfmt off
+    foreach (d ; decisionRange) {
+      d.visit!((a) {
+         alias T = Unqual!(typeof(a));
+	 static if (is(T == CppAssignment)) {
+	   res ~= cast(CppAssignment)a;
+	 }
+      });
+    }
+			      
+    // dfmt on
+    return res;
+  }
+
+  AnalyzeVarData varData() @trusted {
+    import std.variant : visit;
+    import std.algorithm : each;
+    
+    AnalyzeVarData res;
+
+    // dfmt off
+    decisionRange
+      .each!(d => d.visit!((const(CppIfStmt) a) => res = res + a.varData,
+			   (const(CppForLoop) a) => res = res + a.varData,
+			   (const(CppWhileLoop) a) => res = res + a.varData,
+			   (const(CppSwitch) a) => res = res + a.varData,
+			   (const(CppReturnStmt) a) => res = res + a.varData,
+			   (const(CppAssignment) a) => res = res + a.varData));
+    // dfmt on
+    return res;
+  }
+
+  bool hasCondition() const {
+    import std.variant : visit;
+
+    bool retVal = false;
+    foreach (a ; decisionRange) {
+      // dfmt off
+      a.visit!((d) {
+	  alias T = Unqual!(typeof(d));
+	  static if (is(T == CppIfStmt)) { retVal = true; }
+	  else static if (is(T == CppForLoop)) { retVal = true; }
+	  else static if (is(T == CppWhileLoop)) { retVal = true; }
+	  else static if (is(T == CppSwitch)) {  retVal = true; }
+	  else static if (is(T == CppReturnStmt)) {
+	    auto tmp = cast(CppReturnStmt)d;
+	    if (tmp.isConditional) {
+	      retVal = true;
+	    }
+	  }
+	  else static if (is(T == CppAssignment)) { }
+	});
+      // dfmt on
+      if (retVal) {
+	break;
+      }
+    }
+    
+    return retVal;
+  }
+
+  const pure @nogc:
+  
+  auto decisionRange() {
+    return decisions;
+  }
+}
+
+class CppIfStmt {
+  private {
+    string _condition;
+    Nullable!DecisionBlock body_;
+    Nullable!CppIfStmt else_;
+  }
+
+  this(AnalyzeVarData varData, string c, Nullable!DecisionBlock body_ = Nullable!DecisionBlock.init,
+       Nullable!CppIfStmt else_ = Nullable!CppIfStmt.init)
+  {
+    this._varData = varData;
+    this._condition = c;
+    this.body_ = body_;
+    this.else_ = else_;
+  }
+
+  override string toString() const {
+    string res = "if(" ~ condition ~ ") ";
+    if (!body_.isNull) {
+      res ~= " {\n\t" ~ body_.get.toString ~ "\n}\n";
+    }
+    if (!else_.isNull) {
+      res ~= " else " ~ else_.get.toString;
+    }
+    return res;
+  }
+
+  string[] toSolverFormat(NullableRef!AnalyzeVarData inVarData = NullableRef!AnalyzeVarData.init) const  {
+    import std.string : format;
+
+    bool solverFunc = !inVarData.isNull;
+
+    if (isElse()) {
+      return body_.toSolverFormat(inVarData);
+    }
+    
+    if (body_.isNull && else_.isNull) {
+      // If(C, True, False) <=> C, (in z3 logic..
+      return [fixParamNames(condition, inVarData)];
+    }
+    
+    string defTrue = "True";
+    string defFalse = "False";
+
+    string[] result;
+    string first = defTrue;
+    string second = defFalse;
+    
+    if (!body_.isNull) { //DecisionBlock
+      string[] ifb = body_.toSolverFormat(inVarData);
+      if (ifb.length > 0) {
+	first = ifb[0];
+      }
+    }
+    
+    if (!else_.isNull) { //CppIfStmt
+      string[] else_b;
+      if(isElse()) {
+	 else_b = else_.toSolverFormat(inVarData);
+      } else {
+	else_b = else_.toSolverFormat(inVarData);
+      }
+      if (else_b.length > 0) {
+	second = else_b[0];
+      }
+    } 
+    
+
+    auto r = format("If(%s,%s,%s)", condition, first, second);
+    result ~= fixParamNames(r, inVarData);
+
+    return result;
+  }
+
+  @safe:
+  mixin DecisionGeneric.Variables;
+
+  @nogc const:
+  auto ifBody() {
+    return body_;
+  }
+
+  auto elseBody() {
+    return else_;
+  }
+
+  // Empty condition means the else is just a else and not a else-if
+  auto isElse() {
+    return _condition == "";
+  }
+
+  auto condition() {
+    return _condition;
+  }
+}
+
+struct CppReturnStmt {
+  private {
+    string _condition;
+    bool _conditional;
+  }
+  
+  this(AnalyzeVarData varData, string c, bool ct) {
+    this._varData = varData;
+    this._condition = c;
+    this._conditional = ct;
+  }
+
+  string toString() const {
+    return "return " ~ condition;
+  }
+  
+  string[] toSolverFormat(NullableRef!AnalyzeVarData inVarData = NullableRef!AnalyzeVarData.init) const {
+    string[] res;
+    bool solverFunc = !inVarData.isNull;
+    if (solverFunc || isConditional) {
+      res = [fixParamNames(condition, inVarData)];
+    }
+    return res;
+  }
+  
+  @safe:
+  mixin DecisionGeneric.Variables;
+
+  @nogc const:
+  auto condition() {
+    return _condition;
+  }
+  
+  auto isConditional() {
+    return _conditional;
+  }
+}
+
+struct CppAssignment {
+  private {
+    AnalyzeVariable _var;
+    string _assignment;
+  }
+  
+  this(AnalyzeVariable var, string assign) {
+    this._var = var;
+    this._assignment = assign;
+  }
+  
+  string toString() const {
+    import std.string : format;
+    return format("%s == %s", var.name, assignment); 
+  };
+  
+  string toSolverFormat(NullableRef!AnalyzeVarData inVarData = NullableRef!AnalyzeVarData.init) const {
+    return fixParamNames(_assignment, inVarData);
+  };
+  
+  @safe:
+  mixin DecisionGeneric.Variables;
+
+  @nogc const:
+  auto var() {
+    return _var;
+  }
+  
+  auto assignment() {
+    return _assignment;
+  }
+}
+
+// TODO
+struct CppSwitch {
+const:
+  string toString() { return ""; };
+  string[] toSolverFormat(NullableRef!AnalyzeVarData inVarData = NullableRef!AnalyzeVarData.init) { return []; };
+  @safe:
+  mixin DecisionGeneric.Variables;
+}
+// TODO
+struct CppCase {
+ const:
+  string toString() { return ""; };
+  string[] toSolverFormat(NullableRef!AnalyzeVarData inVarData = NullableRef!AnalyzeVarData.init) { return []; };
+  @safe:
+  mixin DecisionGeneric.Variables;
+}
+// TODO
+struct CppForLoop  {
+ const:
+  string toString() { return ""; };
+  string[] toSolverFormat(NullableRef!AnalyzeVarData inVarData = NullableRef!AnalyzeVarData.init) { return []; };
+  @safe:
+  mixin DecisionGeneric.Variables;
+}
+// TODO
+struct CppWhileLoop {
+ const:
+  string toString() { return ""; };
+  string[] toSolverFormat(NullableRef!AnalyzeVarData inVarData = NullableRef!AnalyzeVarData.init) { return []; };
+  @safe:
+  mixin DecisionGeneric.Variables;
+}
+
+struct TemplateParameter {
+  private {
+    string name_;
+  }
+  
+  this(string name) {
+    this.name_ = name;
+  }
+  
+  @nogc const:
+
+  auto name() {
+    return name_;
+  }
+}
+
 struct CppClass {
     import std.variant : Algebraic;
     import cpptooling.data.symbol.types : FullyQualifiedNameType;
 
     static import cpptooling.data.class_classification;
 
-    alias CppFunc = Algebraic!(CppMethod, CppMethodOp, CppCtor, CppDtor);
+  alias CppFunc = Algebraic!(CppMethod, CppMethodOp, CppCtor, CppDtor);
 
     Nullable!USRType usr;
 
@@ -1081,6 +1592,8 @@ struct CppClass {
         TypeKindVariable[] members_pub;
         TypeKindVariable[] members_prot;
         TypeKindVariable[] members_priv;
+
+	TemplateParameter[] template_params;
     }
 
     this(const CppClassName name, const CppInherit[] inherits, const CppNsStack ns) @safe
@@ -1232,7 +1745,7 @@ struct CppClass {
 
         classification_ = cpptooling.data.class_classification.classifyClass(classification_,
                 f, cast(Flag!"hasMember")(memberRange.length > 0));
-    }
+	    }
 
 @safe:
     mixin mixinUniqueId!size_t;
@@ -1288,10 +1801,21 @@ struct CppClass {
         inherits_ ~= inh;
     }
 
+  void put(TemplateParameter tp) {
+    template_params ~= tp;
+    if (!isTemplate) {
+      classification_ = cpptooling.data.class_classification.State.Template;
+    }
+  }
+
 const:
 
     auto inheritRange() @nogc {
         return inherits_;
+    }
+
+    auto templateParamRange() @nogc {
+        return template_params;
     }
 
     auto methodRange() @nogc {
@@ -1391,6 +1915,14 @@ const:
             return classification_.among(VirtualDtor, Pure) != 0;
         }
     }
+
+  bool isTemplate() {
+    import std.algorithm : among;
+
+    with (cpptooling.data.class_classification.State) {
+      return classification_.among(Template) != 0;
+    }
+  }
 
     auto classification() {
         return classification_;

@@ -507,8 +507,7 @@ struct RecordResult {
 }
 
 RecordResult analyzeRecord(T)(const(T) decl, ref Container container, in uint indent)
-        if (staticIndexOf!(T, ClassDecl, StructDecl, ClassTemplate,
-            ClassTemplatePartialSpecialization, UnionDecl) != -1) {
+  if (staticIndexOf!(T, ClassDecl, StructDecl, ClassTemplate, UnionDecl) != -1) {
     return analyzeRecord(decl.cursor, container, indent);
 }
 
@@ -557,7 +556,8 @@ final class ClassVisitor : Visitor {
 
     this(T)(const(T) decl, const(CppNsStack) reside_in_ns, RecordResult result,
             ref Container container, const uint indent)
-            if (is(T == ClassDecl) || is(T == StructDecl)) {
+    if (is(T == ClassDecl) || is(T == StructDecl) ||
+	is(T == ClassTemplate) || is(T == ClassTemplatePartialSpecialization)) {
         this.container = &container;
         this.indent = indent;
 
@@ -570,6 +570,12 @@ final class ClassVisitor : Visitor {
         this.root = CppClass(result.name, CppInherit[].init, reside_in_ns);
         this.root.usr = result.type.kind.usr;
     }
+
+  // Template specific cursor
+  override void visit(const(TemplateTypeParameter) v) @trusted {
+    mixin(mixinNodeLog!());
+    root.put(TemplateParameter(v.cursor.spelling));
+  }
 
     override void visit(const(CxxBaseSpecifier) v) {
         import std.range : retro;
@@ -646,7 +652,6 @@ final class ClassVisitor : Visitor {
 
         auto result = analyzeFieldDecl(v, *container, indent);
         root.put(TypeKindVariable(result.type, result.name), accessType);
-
         debug logger.trace("member: ", result.name);
     }
 }

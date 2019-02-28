@@ -559,11 +559,15 @@ body {
         break;
 
     case unexposedDecl:
-        rval = retrieveUnexposed(c, container, indent);
-        if (rval.isNull) {
-            logger.trace("Not implemented type retrieval for node ", c.usr);
-        }
-        break;
+      rval = retrieveUnexposed(c, container, indent);
+      if (rval.isNull) {
+	logger.trace("Not implemented type retrieval for node ", c.usr);
+      }
+      break;
+
+    case conversionFunction:
+      rval = retrieveFunc(c, container, indent);
+      break;
 
     default:
         // skip for now, may implement in the future
@@ -1825,7 +1829,7 @@ private Nullable!TypeResults retrieveFunc(ref const(Cursor) c,
         ref const(Container) container, const uint this_indent)
 in {
     logNode(c, this_indent);
-    assert(c.kind.among(CXCursorKind.functionDecl, CXCursorKind.cxxMethod));
+    assert(c.kind.among(CXCursorKind.functionDecl, CXCursorKind.cxxMethod, CXCursorKind.conversionFunction));
 }
 out (result) {
     logTypeResult(result, this_indent);
@@ -2118,7 +2122,6 @@ out (result) {
 }
 body {
     Nullable!string r;
-
     with (CXTypeKind) switch (kind) {
     case invalid:
         break;

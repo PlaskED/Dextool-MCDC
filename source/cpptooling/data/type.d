@@ -9,8 +9,8 @@ one at http://mozilla.org/MPL/2.0/.
 */
 module cpptooling.data.type;
 
-import std.traits : isSomeString;
-import std.typecons : Flag;
+import std.traits : isSomeString, Unqual;
+import std.typecons : Flag, NullableRef;
 import std.variant : Algebraic;
 
 import taggedalgebraic;
@@ -21,6 +21,8 @@ public import cpptooling.data.kind_type : TypeKind, TypeAttr, TypeKindAttr,
 
 static import cpptooling.data.class_classification;
 
+alias IDType = Algebraic!(size_t, string);
+
 /// Convert a namespace stack to a string separated by ::.
 string toStringNs(T : const(Tx), Tx)(T ns) @safe 
         if (is(Tx == CppNsStack) || is(Tx == CppNs[])) {
@@ -28,6 +30,119 @@ string toStringNs(T : const(Tx), Tx)(T ns) @safe
     import std.array : join;
 
     return (cast(const CppNs[]) ns).map!(a => cast(string) a).join("::");
+}
+
+struct AnalyzeVariable {
+  int _version;
+  TypeKindVariable var;
+  string varId;
+  bool _origin;
+  
+  this(TypeKindVariable var, string varId) {
+    this.var = var;
+    this._version = 0;
+    this.varId = varId;
+    this._origin = false;
+  }
+
+  string toString() const {
+    import std.format : format;
+    return format("AnalyzeVariable(var: %s, varId: %s, version: %s)", name, varId, _version);
+  }
+
+  @nogc const:
+  string name() {
+    return var.name.payload;
+  }
+  
+  TypeKind typeKind() {
+    return var.type.kind;
+  }
+
+  auto origin() {
+    return _origin;
+  }
+}
+
+struct AnalyzeVarData {
+  import cpptooling.data.representation : CppAssignment;
+  AnalyzeVariable[IDType] variables;
+  string[][IDType] funcCallMapping;
+  string[][string] callParamMapping;
+  string[string] paramRegexMapping;
+  IDType funcId;
+  CppAssignment[] innerAssigns; //Assignments found nested inside of conditions during analysis
+
+  void putVars(AnalyzeVariable[IDType] vars_in) {
+    import std.algorithm : each;
+    vars_in.keys.each!(a => variables[a] = vars_in[a]); 
+  }
+
+  AnalyzeVariable versionVariable(TypeKindVariable tkVar, string varId, bool incr = false) {
+    import std.format : format;
+
+    AnalyzeVariable res;
+    auto varKey = cast(IDType)varId;
+    if (auto var = varKey in variables) {
+      int varVersion = var._version;
+      if (incr) {
+	auto newVarId = format("%s%s", varId, varVersion);
+	res = AnalyzeVariable(var.var, newVarId);
+	variables[cast(IDType)res.varId] = res;
+	var._version++;
+      } else {
+	if (varVersion == 0) {
+	  res = AnalyzeVariable(var.var, varId);
+	} else {
+	  auto currVarId = format("%s%s", varId, varVersion-1);
+	  res = AnalyzeVariable(var.var, currVarId);
+	}
+      }
+    } else {
+      res = AnalyzeVariable(tkVar, varId);
+      res._origin = true; //Original variable!
+      variables[cast(IDType)varId] = res;
+    }
+
+    return res;
+  }
+
+  AnalyzeVarData opAdd(in AnalyzeVarData a) {
+    import std.algorithm : each;
+    
+    auto varData = new AnalyzeVarData(variables, funcCallMapping, callParamMapping, paramRegexMapping);
+
+    a.variables.keys.each!(vk => varData.variables[vk] = a.variables[vk]);
+
+    foreach(fcmKey ; a.funcCallMapping.keys) {
+      if (fcmKey in varData.funcCallMapping) {
+	varData.funcCallMapping[fcmKey] ~= a.funcCallMapping[fcmKey].dup;
+      } else {
+	varData.funcCallMapping[fcmKey] = a.funcCallMapping[fcmKey].dup;
+      }
+    }
+    foreach(cpmKey ; a.callParamMapping.keys) {
+      if (cpmKey in varData.callParamMapping) {
+	varData.callParamMapping[cpmKey] ~= a.callParamMapping[cpmKey].dup;
+      } else {
+	varData.callParamMapping[cpmKey] = a.callParamMapping[cpmKey].dup;
+      }
+    }
+    foreach(prmKey ; a.paramRegexMapping.keys) {
+      varData.paramRegexMapping[prmKey] = a.paramRegexMapping[prmKey].dup;
+    }
+    
+    return *varData;
+  }
+
+  string toString() {
+    import std.format : format;
+    import std.algorithm : map;
+    import std.array : join, array;
+    return format("vars: %s\nfcm: %s\ncpm: %s\nprm: %s\nfuncId: %s",
+		  variables.keys.map!(a => variables[a].toString).array.join(","),
+		  funcCallMapping, callParamMapping, paramRegexMapping, funcId);
+  }
 }
 
 /// Locaiton of a symbol.

@@ -1,0 +1,12 @@
+[
+{
+  "directory": "/home/plask/thesis/Dextool-MCDC/SolutioCpp/build/Library",
+  "command": "/usr/bin/c++ -I/home/plask/thesis/Dextool-MCDC/SolutioCpp/Library -o CMakeFiles/solutio.dir/Geometry/Cylinder.cpp.o -c /home/plask/thesis/Dextool-MCDC/SolutioCpp/Library/Geometry/Cylinder.cpp",
+  "file": "/home/plask/thesis/Dextool-MCDC/SolutioCpp/Library/Geometry/Cylinder.cpp"
+},
+{
+  "directory": "/home/plask/thesis/Dextool-MCDC/SolutioCpp/build/Library",
+  "command": "/usr/bin/c++ -I/home/plask/thesis/Dextool-MCDC/SolutioCpp/Library -c /home/plask/thesis/Dextool-MCDC/SolutioCpp/Library/Geometry/Cylinder.hpp",
+  "file": "/home/plask/thesis/Dextool-MCDC/SolutioCpp/Library/Geometry/Cylinder.hpp"
+}
+]

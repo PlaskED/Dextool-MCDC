@@ -107,8 +107,26 @@ import clang.Visitor;
      * If it is NOT a declaration then the return value is the same as
      * spelling.
      */
-    @property string displayName() const @trusted {
-        return toD(clang_getCursorDisplayName(cx));
+  @property string displayName() const @trusted {
+    return toD(clang_getCursorDisplayName(cx));
+  }
+
+  /** Return the cursor kind of the template specialization that
+   * would be generated when instantiating the template with   
+   * this cursor.
+   */
+  @property CXCursorKind templateKind() const @trusted {
+    return clang_getTemplateCursorKind(cx);
+  }
+
+  /** Return the cursor that represents the template that given 
+   * cursor specializes (or is instantiated) from.
+   *
+   * It will only work for a cursor that represent a specialization or insantiation
+   * of a template. Otherwise, NULL cursor is returned.
+   */
+  @property CXCursor templateCursor() const @trusted {
+        return clang_getSpecializedCursorTemplate(cx);
     }
 
     /** Retrieve the string representing the mangled name of the cursor.

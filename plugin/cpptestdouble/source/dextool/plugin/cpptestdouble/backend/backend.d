@@ -115,7 +115,6 @@ struct Backend {
         analyze.nullify();
 
         logger.tracef("Translated to implementation:\n%u", impl_data.root);
-        logger.trace("kind:\n", impl_data.kind);
 
         GeneratedData gen_data;
         gen_data.includeHooks = impl_data.includeHooks;
@@ -274,8 +273,10 @@ CppNamespace translate(CppNamespace input, ref ImplData data,
                 ns.resideInNs, params.getMainNs, params.getMainInterface, ns);
     }
 
-    input.namespaceRange().map!(a => translate(a, data, container, ctrl,
-            params)).filter!(a => !a.empty).each!(a => ns.put(a));
+    input.namespaceRange()
+      .map!(a => translate(a, data, container, ctrl,params))
+      .filter!(a => !a.empty)
+      .each!(a => ns.put(a));
 
     foreach (class_; input.classRange.map!(a => mergeClassInherit(a, container,
             a => data.lookupClass(a)))) {

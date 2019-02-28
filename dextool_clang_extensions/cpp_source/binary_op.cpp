@@ -146,6 +146,7 @@ struct DXOperator {
     OpKind kind;
     CXSourceLocation location;
     int8_t opLength;
+    const char* opString;
 
     CXCursor cursor;
 };
@@ -284,7 +285,6 @@ static bool toOpKind(clang::BinaryOperatorKind opcode, DXOperator& rval) {
         // unknown operator, skipping.
         return false;
     }
-
     return true;
 }
 
@@ -350,7 +350,6 @@ static bool toOpKind(clang::UnaryOperatorKind opcode, DXOperator& rval) {
         // unknown operator, skipping.
         return false;
     }
-
     return true;
 }
 
@@ -536,7 +535,6 @@ static bool toOpKind(clang::OverloadedOperatorKind opcode, DXOperator& rval) {
         // unknown operator, skipping.
         return false;
     }
-
     return true;
 }
 
@@ -561,12 +559,15 @@ DXOperator dex_getExprOperator(const CXCursor cx_expr) {
         if (!toOpKind(op->getOpcode(), rval)) {
             return rval;
         }
+	rval.opString = op->getOpcodeStr(op->getOpcode()).data();
+	
         rval.location = translateSourceLocation(*getCursorContext(cx_expr), op->getOperatorLoc());
     } else if (llvm::isa<clang::UnaryOperator>(expr)) {
         const clang::UnaryOperator* op = llvm::cast<const clang::UnaryOperator>(expr);
         if (!toOpKind(op->getOpcode(), rval)) {
             return rval;
         }
+	rval.opString = op->getOpcodeStr(op->getOpcode()).data();
         rval.location = translateSourceLocation(*getCursorContext(cx_expr), op->getOperatorLoc());
     } else if (llvm::isa<clang::CXXOperatorCallExpr>(expr)) {
         const clang::CXXOperatorCallExpr* op = llvm::cast<const clang::CXXOperatorCallExpr>(expr);
@@ -577,7 +578,7 @@ DXOperator dex_getExprOperator(const CXCursor cx_expr) {
     } else {
         return rval;
     }
-
+ 
     // this shall be the last thing done in this function.
     rval.hasValue = true;
     return rval;

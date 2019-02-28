@@ -25,7 +25,8 @@ enum State {
     Virtual,
     VirtualDtor, // only one method, a d'tor and it is virtual
     Abstract,
-    Pure
+    Pure,
+    Template, // When a class is a template
 }
 
 /// The type the method is.
@@ -146,6 +147,8 @@ State classifyClass(in State current, in MethodKind method_kind,
             }
         }
         break;
+    case State.Template:
+      break;
     }
 
     debug {
